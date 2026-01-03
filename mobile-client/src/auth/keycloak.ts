@@ -1,62 +1,81 @@
 import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const KEYCLOAK_URL = process.env.EXPO_PUBLIC_KEYCLOAK_URL ?? 'http://localhost:8080';
 const REALM = 'reportmaxxing';
 const CLIENT_ID = 'mobile-app';
 
-const discovery: AuthSession.DiscoveryDocument = {
-  authorizationEndpoint: `${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/auth`,
-  tokenEndpoint: `${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/token`,
-  revocationEndpoint: `${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/revoke`,
-  endSessionEndpoint: `${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/logout`,
-};
+const issuer = `${KEYCLOAK_URL}/realms/${REALM}`;
 
-export interface TokenResponse {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
+export function getRedirectUri(): string {
+  return AuthSession.makeRedirectUri();
 }
 
-/**
- * Login with username/password using Keycloak's token endpoint
- * Uses Resource Owner Password Credentials (ROPC) grant type
- */
-export async function loginWithCredentials(
-  username: string,
-  password: string
+export function useKeycloakAuth() {
+  const redirectUri = getRedirectUri();
+  const discoveryDoc = AuthSession.useAutoDiscovery(issuer);
+
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: CLIENT_ID,
+      scopes: ['openid', 'profile', 'email'],
+      redirectUri,
+      usePKCE: true,
+      responseType: AuthSession.ResponseType.Code,
+    },
+    discoveryDoc
+  );
+
+  return {
+    request,
+    response,
+    promptAsync,
+    isLoading: !request || !discoveryDoc,
+    redirectUri,
+  };
+}
+
+export async function exchangeCodeForToken(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string
 ): Promise<TokenResponse> {
-  const response = await fetch(discovery.tokenEndpoint!, {
+  const tokenEndpoint = `${issuer}/protocol/openid-connect/token`;
+
+  const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams({
-      grant_type: 'password',
+      grant_type: 'authorization_code',
       client_id: CLIENT_ID,
-      username,
-      password,
-      scope: 'openid profile email',
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
     }).toString(),
   });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data.error_description || data.error || 'Login failed');
+    throw new Error(data.error_description || data.error || 'Token exchange failed');
   }
 
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token ?? '',
+    idToken: data.id_token ?? '',
     expiresIn: data.expires_in ?? 900,
   };
 }
 
-/**
- * Refresh access token using refresh token
- */
 export async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-  const response = await fetch(discovery.tokenEndpoint!, {
+  const tokenEndpoint = `${issuer}/protocol/openid-connect/token`;
+
+  const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -77,29 +96,30 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token ?? refreshToken,
+    idToken: data.id_token ?? '',
     expiresIn: data.expires_in ?? 900,
   };
 }
 
-/**
- * Logout by revoking the refresh token
- */
-export async function logout(refreshToken: string): Promise<void> {
-  try {
-    await fetch(discovery.revocationEndpoint!, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: CLIENT_ID,
-        token: refreshToken,
-        token_type_hint: 'refresh_token',
-      }).toString(),
-    });
-  } catch {
-    // Revocation is best-effort
-  }
+export async function logoutWithBrowser(idToken: string): Promise<void> {
+  const redirectUri = getRedirectUri();
+  const endSessionEndpoint = `${issuer}/protocol/openid-connect/logout`;
+
+  const logoutUrl = `${endSessionEndpoint}?` +
+    new URLSearchParams({
+      id_token_hint: idToken,
+      post_logout_redirect_uri: redirectUri,
+      client_id: CLIENT_ID,
+    }).toString();
+
+  await WebBrowser.openAuthSessionAsync(logoutUrl, redirectUri);
+}
+
+export interface TokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  idToken: string;
+  expiresIn: number;
 }
 
 export function getKeycloakConfig() {

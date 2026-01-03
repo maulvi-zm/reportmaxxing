@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { clearStoredTokens } from '../auth/storage';
+import { logoutWithBrowser } from '../auth/keycloak';
+import { getStoredTokens, clearStoredTokens } from '../auth/storage';
 import { fetchProfile, UserProfile } from '../api/profile';
 
 const ROLE_DISPLAY_NAMES: Record<string, string> = {
@@ -47,11 +48,15 @@ export function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await clearStoredTokens();
+            const tokens = await getStoredTokens();
+            if (tokens?.idToken) {
+              await logoutWithBrowser(tokens.idToken);
+            }
           } catch {
-            // Ignore errors
+          } finally {
+            await clearStoredTokens();
+            router.replace('/login');
           }
-          router.replace('/login');
         },
       },
     ]);

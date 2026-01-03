@@ -1,96 +1,95 @@
-import { useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { loginWithCredentials } from '../auth/keycloak';
+import * as WebBrowser from 'expo-web-browser';
+import { useKeycloakAuth, exchangeCodeForToken } from '../auth/keycloak';
 import { setStoredTokens } from '../auth/storage';
+
+WebBrowser.maybeCompleteAuthSession();
 
 export function LoginScreen() {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [exchanging, setExchanging] = useState(false);
 
-  const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      setError('Please enter email and password.');
+  const { request, response, promptAsync, isLoading, redirectUri } = useKeycloakAuth();
+
+  useEffect(() => {
+    if (response?.type === 'success' && response.params.code) {
+      handleCodeExchange(response.params.code);
+    } else if (response?.type === 'error') {
+      setError(response.params.error_description || 'Authentication failed');
+    } else if (response?.type === 'dismiss') {
+      setError('Authentication was cancelled');
+    }
+  }, [response]);
+
+  const handleCodeExchange = async (code: string) => {
+    if (!request?.codeVerifier) {
+      setError('Missing code verifier');
       return;
     }
-    
-    setLoading(true);
+
+    setExchanging(true);
     setError(null);
-    
+
     try {
-      const tokens = await loginWithCredentials(email.trim(), password);
-      await setStoredTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresIn);
+      const tokens = await exchangeCodeForToken(
+        code,
+        request.codeVerifier,
+        redirectUri
+      );
+
+      await setStoredTokens(
+        tokens.accessToken,
+        tokens.refreshToken,
+        tokens.idToken,
+        tokens.expiresIn
+      );
+
       router.replace('/');
     } catch (err: any) {
-      console.error('Login error:', err);
-      setError(err?.message || 'Invalid credentials');
+      setError(err?.message || 'Failed to complete login');
     } finally {
-      setLoading(false);
+      setExchanging(false);
     }
   };
 
+  const handleLogin = async () => {
+    setError(null);
+    await promptAsync();
+  };
+
+  const isButtonDisabled = isLoading || exchanging;
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView 
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>Reportmaxxing</Text>
           <Text style={styles.subtitle}>Sign in to submit and track reports</Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Email</Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholderTextColor="#94a3b8"
-          />
-
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Enter your password"
-            secureTextEntry
-            placeholderTextColor="#94a3b8"
-          />
-
           <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
+            style={[styles.button, isButtonDisabled && styles.buttonDisabled]}
             onPress={handleLogin}
-            disabled={loading}
+            disabled={isButtonDisabled}
           >
-            {loading ? (
+            {isButtonDisabled ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Sign In</Text>
+              <Text style={styles.buttonText}>Sign in with Keycloak</Text>
             )}
           </Pressable>
-          
+
           {error && <Text style={styles.errorText}>{error}</Text>}
+
+          <Text style={styles.hint}>
+            You will be redirected to Keycloak to sign in securely.
+          </Text>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -108,31 +107,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-    marginBottom: 6,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: '#0f172a',
-    marginBottom: 14,
-  },
   button: {
     backgroundColor: '#0f766e',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 6,
   },
   buttonDisabled: { opacity: 0.7 },
   buttonText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
   errorText: { marginTop: 12, color: '#b91c1c', fontSize: 12, textAlign: 'center' },
+  hint: { marginTop: 16, fontSize: 12, color: '#64748b', textAlign: 'center' },
 });

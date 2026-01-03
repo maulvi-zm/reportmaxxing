@@ -60,14 +60,37 @@ else
     echo "Realm created"
 fi
 
-# Check if client exists
-CLIENT_EXISTS=$(curl -s "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+# Check if client exists and get its internal ID
+CLIENT_INFO=$(curl -s "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}")
+CLIENT_DB_ID=$(echo "$CLIENT_INFO" | python3 -c "import sys, json; clients=json.load(sys.stdin); print(clients[0]['id'] if clients else '')")
 
-if [ "$CLIENT_EXISTS" != "0" ]; then
-    echo "Client ${CLIENT_ID} already exists, skipping creation"
+if [ -n "$CLIENT_DB_ID" ]; then
+    echo "Client ${CLIENT_ID} exists (ID: $CLIENT_DB_ID), updating configuration..."
+    # Update existing client
+    curl -s -X PUT "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${CLIENT_DB_ID}" \
+        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"clientId\": \"${CLIENT_ID}\",
+            \"enabled\": true,
+            \"publicClient\": true,
+            \"standardFlowEnabled\": true,
+            \"implicitFlowEnabled\": false,
+            \"directAccessGrantsEnabled\": false,
+            \"redirectUris\": [
+                \"exp://localhost:8082/--/*\",
+                \"exp://127.0.0.1:8082/--/*\",
+                \"reportmaxxing://*\",
+                \"http://localhost:8081/*\",
+                \"http://localhost:8082/*\"
+            ],
+            \"webOrigins\": [\"*\"],
+            \"protocol\": \"openid-connect\"
+        }"
+    echo "Client updated"
 else
-    # Create client
+    # Create new client
     echo "Creating client ${CLIENT_ID}..."
     curl -s -X POST "${KEYCLOAK_URL}/admin/realms/${REALM}/clients" \
         -H "Authorization: Bearer ${ADMIN_TOKEN}" \
@@ -78,8 +101,14 @@ else
             \"publicClient\": true,
             \"standardFlowEnabled\": true,
             \"implicitFlowEnabled\": false,
-            \"directAccessGrantsEnabled\": true,
-            \"redirectUris\": [\"exp://*\", \"reportmaxxing://*\", \"http://localhost:8081/*\", \"http://localhost:8082/*\"],
+            \"directAccessGrantsEnabled\": false,
+            \"redirectUris\": [
+                \"exp://localhost:8082/--/*\",
+                \"exp://127.0.0.1:8082/--/*\",
+                \"reportmaxxing://*\",
+                \"http://localhost:8081/*\",
+                \"http://localhost:8082/*\"
+            ],
             \"webOrigins\": [\"*\"],
             \"protocol\": \"openid-connect\"
         }"

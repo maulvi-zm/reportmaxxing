@@ -42,7 +42,6 @@ export const apiClient = {
     const tokens = await getStoredTokens();
     if (!tokens) return null;
 
-    // Add buffer time (30 seconds) to refresh before actual expiry
     const bufferMs = 30 * 1000;
     if (isTokenExpired(tokens.expiresAt, bufferMs)) {
       try {
@@ -50,11 +49,11 @@ export const apiClient = {
         await setStoredTokens(
           newTokens.accessToken,
           newTokens.refreshToken,
+          tokens.idToken,
           newTokens.expiresIn
         );
         return newTokens.accessToken;
       } catch {
-        // Refresh failed, clear tokens and notify
         await clearStoredTokens();
         notifySessionExpired();
         return null;
@@ -90,6 +89,7 @@ export const apiClient = {
             await setStoredTokens(
               newTokens.accessToken,
               newTokens.refreshToken,
+              tokens.idToken,
               newTokens.expiresIn
             );
             // Retry the request with new token
