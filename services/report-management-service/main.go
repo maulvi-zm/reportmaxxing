@@ -2,11 +2,13 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"reportmaxxing/services/report-management-service/kafka"
 	"reportmaxxing/services/report-management-service/models"
 	"reportmaxxing/services/report-management-service/response"
 	"reportmaxxing/services/report-management-service/services"
@@ -26,7 +28,14 @@ func main() {
 		log.Fatalf("failed to migrate: %v", err)
 	}
 
-	reportService := services.NewReportService(db)
+	brokerURL := "localhost:9092"
+	if url := os.Getenv("KAFKA_BROKER_URL"); url != "" {
+		brokerURL = url
+	}
+	kafkaProducer := kafka.NewProducer(brokerURL)
+	defer kafkaProducer.Close()
+
+	reportService := services.NewReportService(db, kafkaProducer)
 
 	r := gin.Default()
 
@@ -65,6 +74,25 @@ func main() {
 				return
 			}
 			response.CreatedWithMessage(c, "Report created successfully", report)
+		})
+
+		api.PUT("/reports/:id/status", func(c *gin.Context) {
+			id := c.Param("id")
+
+			var req struct {
+				Status string `json:"status" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				response.BadRequest(c, err.Error())
+				return
+			}
+
+			report, err := reportService.UpdateReportStatus(id, models.ReportStatus(req.Status))
+			if err != nil {
+				response.NotFound(c, "Report not found")
+				return
+			}
+			response.Success(c, report)
 		})
 	}
 

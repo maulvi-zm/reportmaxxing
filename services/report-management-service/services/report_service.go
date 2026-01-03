@@ -2,11 +2,13 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"reportmaxxing/services/report-management-service/kafka"
 	"reportmaxxing/services/report-management-service/models"
 )
 
@@ -17,11 +19,12 @@ const (
 )
 
 type ReportService struct {
-	db *gorm.DB
+	db       *gorm.DB
+	producer *kafka.Producer
 }
 
-func NewReportService(db *gorm.DB) *ReportService {
-	return &ReportService{db: db}
+func NewReportService(db *gorm.DB, producer *kafka.Producer) *ReportService {
+	return &ReportService{db: db, producer: producer}
 }
 
 func (s *ReportService) GetAllReports() ([]models.Report, error) {
@@ -90,7 +93,25 @@ func (s *ReportService) CreateReport(userID string, req models.CreateReportReque
 		return nil, err
 	}
 
-	s.db.Preload("Updates").First(&report, report.ID)
+	s.db.Preload("Updates").First(&report, "id = ?", report.ID)
+
+	event := &models.ReportCreatedEvent{
+		EventID:     uuid.New().String(),
+		EventType:   models.EventTypeReportCreated,
+		Timestamp:   time.Now(),
+		ReportID:    report.ID,
+		UserID:      userID,
+		Title:       report.Title,
+		Description: report.Description,
+		Category:    string(report.Category),
+		Status:      string(report.Status),
+		Visibility:  string(report.Visibility),
+	}
+
+	if err := s.producer.PublishReportCreated(event); err != nil {
+		log.Printf("Kafka publish failed (continuing): %v", err)
+	}
+
 	return &report, nil
 }
 
@@ -103,4 +124,37 @@ func (s *ReportService) generateReportID() (string, error) {
 
 func formatDateLabel(t time.Time) string {
 	return t.Format("Jan 02, 2006")
+}
+
+func (s *ReportService) UpdateReportStatus(reportID string, newStatus models.ReportStatus) (*models.Report, error) {
+	var report models.Report
+	if err := s.db.First(&report, "id = ?", reportID).Error; err != nil {
+		return nil, err
+	}
+
+	oldStatus := report.Status
+
+	report.Status = newStatus
+	report.UpdatedAt = time.Now()
+	if err := s.db.Save(&report).Error; err != nil {
+		return nil, err
+	}
+
+	s.db.Preload("Updates").First(&report, "id = ?", report.ID)
+
+	event := &models.ReportStatusChangedEvent{
+		EventID:   uuid.New().String(),
+		EventType: models.EventTypeReportStatusChanged,
+		Timestamp: time.Now(),
+		ReportID:  report.ID,
+		UserID:    report.UserID,
+		OldStatus: string(oldStatus),
+		NewStatus: string(newStatus),
+	}
+
+	if err := s.producer.PublishReportStatusChanged(event); err != nil {
+		log.Printf("Kafka publish failed (continuing): %v", err)
+	}
+
+	return &report, nil
 }

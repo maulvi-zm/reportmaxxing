@@ -1,5 +1,6 @@
 # Binaries
 report-server
+main
 
 # Build artifacts
 *.exe
