@@ -79,11 +79,10 @@ if [ -n "$CLIENT_DB_ID" ]; then
             \"implicitFlowEnabled\": false,
             \"directAccessGrantsEnabled\": false,
             \"redirectUris\": [
-                \"exp://localhost:8082/--/*\",
-                \"exp://127.0.0.1:8082/--/*\",
-                \"reportmaxxing://*\",
-                \"http://localhost:8081/*\",
-                \"http://localhost:8082/*\"
+                \"exp://localhost:8082\",
+                \"exp://127.0.0.1:8082\",
+                \"exp://*:8082\",
+                \"reportmaxxing://oauth\"
             ],
             \"webOrigins\": [\"*\"],
             \"protocol\": \"openid-connect\"
@@ -103,11 +102,10 @@ else
             \"implicitFlowEnabled\": false,
             \"directAccessGrantsEnabled\": false,
             \"redirectUris\": [
-                \"exp://localhost:8082/--/*\",
-                \"exp://127.0.0.1:8082/--/*\",
-                \"reportmaxxing://*\",
-                \"http://localhost:8081/*\",
-                \"http://localhost:8082/*\"
+                \"exp://localhost:8082\",
+                \"exp://127.0.0.1:8082\",
+                \"exp://*:8082\",
+                \"reportmaxxing://oauth\"
             ],
             \"webOrigins\": [\"*\"],
             \"protocol\": \"openid-connect\"

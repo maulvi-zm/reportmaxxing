@@ -103,16 +103,22 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 
 export async function logoutWithBrowser(idToken: string): Promise<void> {
   const redirectUri = getRedirectUri();
-  const endSessionEndpoint = `${issuer}/protocol/openid-connect/logout`;
+  const revocationEndpoint = `${issuer}/protocol/openid-connect/revoke`;
 
-  const logoutUrl = `${endSessionEndpoint}?` +
-    new URLSearchParams({
-      id_token_hint: idToken,
-      post_logout_redirect_uri: redirectUri,
-      client_id: CLIENT_ID,
-    }).toString();
-
-  await WebBrowser.openAuthSessionAsync(logoutUrl, redirectUri);
+  try {
+    await fetch(revocationEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: CLIENT_ID,
+        token: idToken,
+        token_type_hint: 'id_token',
+      }).toString(),
+    });
+  } catch {
+  }
 }
 
 export interface TokenResponse {
