@@ -26,5 +26,5 @@ export interface CreateReportInput {
   description: string;
   category: ReportCategory;
   visibility: ReportVisibility;
-  imageUri?: string;
+  imageUrl?: string;
 }

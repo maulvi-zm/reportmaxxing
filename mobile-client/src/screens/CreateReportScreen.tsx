@@ -25,7 +25,11 @@ export function CreateReportScreen() {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<ReportCategory>('CRIME');
   const [visibility, setVisibility] = useState<ReportVisibility>('PUBLIC');
-  const [imageUri, setImageUri] = useState<string | undefined>();
+  const [image, setImage] = useState<{
+    uri: string;
+    fileName: string;
+    mimeType: string;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const pickImage = async () => {
@@ -41,12 +45,20 @@ export function CreateReportScreen() {
     });
 
     if (!result.canceled && result.assets?.length) {
-      setImageUri(result.assets[0].uri);
+      const asset = result.assets[0];
+      const fileName =
+        asset.fileName ?? asset.uri.split('/').pop() ?? `report-${Date.now()}.jpg`;
+      const mimeType = asset.mimeType ?? 'image/jpeg';
+      setImage({
+        uri: asset.uri,
+        fileName,
+        mimeType,
+      });
     }
   };
 
   const removeImage = () => {
-    setImageUri(undefined);
+    setImage(null);
   };
 
   const submitReport = async () => {
@@ -55,16 +67,19 @@ export function CreateReportScreen() {
       return;
     }
 
-    const payload: CreateReportInput = {
-      title: title.trim(),
-      description: description.trim(),
-      category,
-      visibility,
-      imageUri,
-    };
-
     try {
       setSubmitting(true);
+      let imageUrl: string | undefined;
+      if (image) {
+        imageUrl = await reportsApi.uploadReportImage(image.uri, image.fileName, image.mimeType);
+      }
+      const payload: CreateReportInput = {
+        title: title.trim(),
+        description: description.trim(),
+        category,
+        visibility,
+        imageUrl,
+      };
       await reportsApi.createReport(payload);
       Alert.alert('Report submitted', 'Your report has been created.');
       router.back();
@@ -82,13 +97,13 @@ export function CreateReportScreen() {
         <Text style={styles.subtitle}>Share issues in your area with the city.</Text>
 
         <Pressable onPress={pickImage} style={styles.imagePicker}>
-          {imageUri ? (
-            <Image source={{ uri: imageUri }} style={styles.imagePreview} />
+          {image ? (
+            <Image source={{ uri: image.uri }} style={styles.imagePreview} />
           ) : (
             <Text style={styles.imageText}>Add a photo (optional)</Text>
           )}
         </Pressable>
-        {imageUri && (
+        {image && (
           <Pressable onPress={removeImage} style={styles.removeButton}>
             <Text style={styles.removeText}>Remove photo</Text>
           </Pressable>

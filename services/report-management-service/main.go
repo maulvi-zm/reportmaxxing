@@ -40,6 +40,10 @@ func main() {
 	}
 
 	reportService := services.NewReportService(db, kafkaProducer)
+	s3Service, err := services.NewS3ServiceFromEnv()
+	if err != nil {
+		log.Fatalf("failed to initialize s3 service: %v", err)
+	}
 
 	r := gin.Default()
 
@@ -132,6 +136,35 @@ func main() {
 				return
 			}
 			response.CreatedWithMessage(c, "Report created successfully", report)
+		})
+
+		api.POST("/reports/upload-url", authMiddleware.RequireRole("CITIZEN"), func(c *gin.Context) {
+			var req struct {
+				FileName    string `json:"file_name" binding:"required"`
+				ContentType string `json:"content_type" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				response.BadRequest(c, err.Error())
+				return
+			}
+
+			userID := c.GetString("userID")
+			uploadURL, imageURL, objectKey, err := s3Service.GenerateUploadURL(
+				c.Request.Context(),
+				userID,
+				req.FileName,
+				req.ContentType,
+			)
+			if err != nil {
+				response.InternalError(c, "Failed to create upload URL")
+				return
+			}
+
+			response.Success(c, gin.H{
+				"upload_url": uploadURL,
+				"image_url":  imageURL,
+				"object_key": objectKey,
+			})
 		})
 
 		api.PUT("/reports/:id/status", authMiddleware.RequireRole("DEPARTMENT_STAFF"), func(c *gin.Context) {

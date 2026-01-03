@@ -70,6 +70,7 @@ func (s *ReportService) CreateReport(userID string, req models.CreateReportReque
 		Category:    models.ReportCategory(req.Category),
 		Status:      StatusOpen,
 		Visibility:  models.ReportVisibility(req.Visibility),
+		ImageURL:    req.ImageURL,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 		UserID:      userID,
