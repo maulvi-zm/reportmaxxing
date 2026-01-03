@@ -1,34 +1,38 @@
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { apiClient } from '../api/client';
-import { clearStoredToken } from '../auth/storage';
+import { clearStoredTokens } from '../auth/storage';
+import { fetchProfile, UserProfile } from '../api/profile';
 
-type Profile = {
-  name: string;
-  email: string;
-  role: string;
-  district: string;
-  openReports: number;
-  resolvedReports: number;
-};
-
-const mockProfile: Profile = {
-  name: 'Jordan Wells',
-  email: 'jordan.wells@example.com',
-  role: 'Field Coordinator',
-  district: 'West River',
-  openReports: 6,
-  resolvedReports: 42,
+const ROLE_DISPLAY_NAMES: Record<string, string> = {
+  CITIZEN: 'Citizen',
+  DEPARTMENT_STAFF: 'Department Staff',
 };
 
 export function ProfileScreen() {
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const loadProfile = async () => {
-    // Replace with a real profile fetch.
-    setProfile(mockProfile);
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await fetchProfile();
+      setProfile(data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load profile';
+      setError(message);
+      
+      // If session expired, redirect to login
+      if (message === 'Session expired' || message === 'Not authenticated') {
+        await clearStoredTokens();
+        router.replace('/login');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -41,30 +45,57 @@ export function ProfileScreen() {
       {
         text: 'Log out',
         style: 'destructive',
-        onPress: () => {
-          apiClient.clearAuthToken();
-          clearStoredToken()
-            .catch(() => undefined)
-            .finally(() => {
-              router.replace('/login');
-            });
+        onPress: async () => {
+          try {
+            await clearStoredTokens();
+          } catch {
+            // Ignore errors
+          }
+          router.replace('/login');
         },
       },
     ]);
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#0f766e" />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error && !profile) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable style={styles.retryButton} onPress={loadProfile}>
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!profile) {
     return <SafeAreaView style={styles.safeArea} />;
   }
+
+  const displayName = profile.name || profile.email.split('@')[0];
+  const roleDisplay = ROLE_DISPLAY_NAMES[profile.role] || profile.role;
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{profile.name[0]}</Text>
+          <Text style={styles.avatarText}>{displayName[0].toUpperCase()}</Text>
         </View>
         <View>
-          <Text style={styles.name}>{profile.name}</Text>
+          <Text style={styles.name}>{displayName}</Text>
           <Text style={styles.email}>{profile.email}</Text>
         </View>
       </View>
@@ -72,27 +103,27 @@ export function ProfileScreen() {
       <View style={styles.card}>
         <View style={styles.row}>
           <Text style={styles.label}>Role</Text>
-          <Text style={styles.value}>{profile.role}</Text>
+          <Text style={styles.value}>{roleDisplay}</Text>
         </View>
         <View style={styles.row}>
-          <Text style={styles.label}>District</Text>
-          <Text style={styles.value}>{profile.district}</Text>
+          <Text style={styles.label}>User ID</Text>
+          <Text style={[styles.value, styles.userId]}>{profile.id.slice(0, 8)}...</Text>
         </View>
       </View>
 
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>{profile.openReports}</Text>
+          <Text style={styles.statValue}>{profile.open_reports}</Text>
           <Text style={styles.statLabel}>Open</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>{profile.resolvedReports}</Text>
+          <Text style={styles.statValue}>{profile.resolved_reports}</Text>
           <Text style={styles.statLabel}>Resolved</Text>
         </View>
       </View>
 
-      <Pressable style={styles.actionButton}>
-        <Text style={styles.actionText}>Edit Profile</Text>
+      <Pressable style={styles.refreshButton} onPress={loadProfile}>
+        <Text style={styles.refreshText}>Refresh Profile</Text>
       </Pressable>
 
       <Pressable style={styles.logoutButton} onPress={handleLogout}>
@@ -106,6 +137,34 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#f8fafc',
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#64748b',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#b91c1c',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#0f766e',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+  },
+  retryText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
@@ -161,6 +220,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0f172a',
   },
+  userId: {
+    fontFamily: 'monospace',
+    fontSize: 13,
+  },
   statsRow: {
     flexDirection: 'row',
     gap: 12,
@@ -186,7 +249,7 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginTop: 6,
   },
-  actionButton: {
+  refreshButton: {
     backgroundColor: '#0f766e',
     borderRadius: 12,
     paddingVertical: 14,
@@ -194,7 +257,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginHorizontal: 20,
   },
-  actionText: {
+  refreshText: {
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '600',

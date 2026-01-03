@@ -1,7 +1,29 @@
-import { Link, Stack } from 'expo-router';
-import { Pressable, Text } from 'react-native';
+import { useEffect } from 'react';
+import { Link, Stack, useRouter } from 'expo-router';
+import { Alert, Pressable, Text } from 'react-native';
+import { onSessionExpired } from '../src/api/client';
 
 export default function RootLayout() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Listen for session expiry events from the API client
+    const unsubscribe = onSessionExpired(() => {
+      Alert.alert(
+        'Session Expired',
+        'Your session has expired. Please log in again.',
+        [
+          {
+            text: 'OK',
+            onPress: () => router.replace('/login'),
+          },
+        ]
+      );
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
   return (
     <Stack
       initialRouteName="login"
@@ -29,11 +51,11 @@ export default function RootLayout() {
       />
       <Stack.Screen
         name="create-report"
-        options={{ title: 'New Report', headerBackTitleVisible: false }}
+        options={{ title: 'New Report' }}
       />
       <Stack.Screen
         name="reports/[id]"
-        options={{ title: 'Report Details', headerBackTitleVisible: false }}
+        options={{ title: 'Report Details' }}
       />
       <Stack.Screen name="profile" options={{ title: 'Profile' }} />
     </Stack>

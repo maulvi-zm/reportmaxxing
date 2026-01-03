@@ -9,12 +9,11 @@ import (
 	"gorm.io/gorm"
 
 	"reportmaxxing/services/report-management-service/kafka"
+	"reportmaxxing/services/report-management-service/middleware"
 	"reportmaxxing/services/report-management-service/models"
 	"reportmaxxing/services/report-management-service/response"
 	"reportmaxxing/services/report-management-service/services"
 )
-
-const MOCK_USER_ID = "mock-user-1"
 
 func main() {
 	dsn := "host=localhost user=gorm password=gorm dbname=gorm port=9920 sslmode=disable TimeZone=Asia/Jakarta"
@@ -28,22 +27,71 @@ func main() {
 		log.Fatalf("failed to migrate: %v", err)
 	}
 
-	brokerURL := "localhost:9092"
-	if url := os.Getenv("KAFKA_BROKER_URL"); url != "" {
-		brokerURL = url
-	}
+	brokerURL := getEnv("KAFKA_BROKER_URL", "localhost:9092")
 	kafkaProducer := kafka.NewProducer(brokerURL)
 	defer kafkaProducer.Close()
+
+	keycloakURL := getEnv("KEYCLOAK_URL", "http://localhost:8080")
+	keycloakRealm := getEnv("KEYCLOAK_REALM", "reportmaxxing")
+
+	authMiddleware, err := middleware.NewAuthMiddleware(keycloakURL, keycloakRealm, db)
+	if err != nil {
+		log.Fatalf("failed to initialize auth middleware: %v", err)
+	}
 
 	reportService := services.NewReportService(db, kafkaProducer)
 
 	r := gin.Default()
 
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
 	api := r.Group("/api")
+	api.Use(authMiddleware.Authenticate())
 	{
+		// Profile endpoint - returns current user info with report stats
+		api.GET("/profile", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			email := c.GetString("email")
+			name := c.GetString("name")
+			roles := c.MustGet("roles").([]string)
+
+			// Get report counts for user
+			var openCount, resolvedCount int64
+			db.Model(&models.Report{}).Where("user_id = ? AND status IN ?", userID, []string{"OPEN", "IN_PROGRESS"}).Count(&openCount)
+			db.Model(&models.Report{}).Where("user_id = ? AND status = ?", userID, "RESOLVED").Count(&resolvedCount)
+
+			// Determine primary role for display
+			primaryRole := "CITIZEN"
+			if middleware.HasRole(roles, "DEPARTMENT_STAFF") {
+				primaryRole = "DEPARTMENT_STAFF"
+			}
+
+			response.Success(c, gin.H{
+				"id":               userID,
+				"email":            email,
+				"name":             name,
+				"role":             primaryRole,
+				"roles":            roles,
+				"open_reports":     openCount,
+				"resolved_reports": resolvedCount,
+			})
+		})
+
 		api.GET("/reports", func(c *gin.Context) {
-			log.Println("GET /api/reports called")
-			reports, err := reportService.GetAllReports()
+			userID := c.GetString("userID")
+			roles := c.MustGet("roles").([]string)
+
+			var reports []models.Report
+			var err error
+
+			if middleware.HasRole(roles, "DEPARTMENT_STAFF") {
+				reports, err = reportService.GetAllReports()
+			} else {
+				reports, err = reportService.GetReportsByUserID(userID)
+			}
+
 			if err != nil {
 				response.InternalError(c, "Failed to fetch reports")
 				return
@@ -53,22 +101,32 @@ func main() {
 
 		api.GET("/reports/:id", func(c *gin.Context) {
 			id := c.Param("id")
+			userID := c.GetString("userID")
+			roles := c.MustGet("roles").([]string)
+
 			report, err := reportService.GetReportByID(id)
 			if err != nil {
 				response.NotFound(c, "Report not found")
 				return
 			}
+
+			if !middleware.HasRole(roles, "DEPARTMENT_STAFF") && report.UserID != userID {
+				response.Forbidden(c, "Access denied")
+				return
+			}
+
 			response.Success(c, report)
 		})
 
-		api.POST("/reports", func(c *gin.Context) {
+		api.POST("/reports", authMiddleware.RequireRole("CITIZEN"), func(c *gin.Context) {
 			var req models.CreateReportRequest
 			if err := c.ShouldBindJSON(&req); err != nil {
 				response.BadRequest(c, err.Error())
 				return
 			}
 
-			report, err := reportService.CreateReport(MOCK_USER_ID, req)
+			userID := c.GetString("userID")
+			report, err := reportService.CreateReport(userID, req)
 			if err != nil {
 				response.InternalError(c, "Failed to create report")
 				return
@@ -76,7 +134,7 @@ func main() {
 			response.CreatedWithMessage(c, "Report created successfully", report)
 		})
 
-		api.PUT("/reports/:id/status", func(c *gin.Context) {
+		api.PUT("/reports/:id/status", authMiddleware.RequireRole("DEPARTMENT_STAFF"), func(c *gin.Context) {
 			id := c.Param("id")
 
 			var req struct {
@@ -96,5 +154,13 @@ func main() {
 		})
 	}
 
-	r.Run()
+	port := getEnv("PORT", "8081")
+	r.Run(":" + port)
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

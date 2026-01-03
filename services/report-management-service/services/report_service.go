@@ -47,6 +47,15 @@ func (s *ReportService) GetReportByID(id string) (*models.Report, error) {
 	return &report, nil
 }
 
+func (s *ReportService) GetReportsByUserID(userID string) ([]models.Report, error) {
+	var reports []models.Report
+	err := s.db.Preload("Updates").
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Find(&reports).Error
+	return reports, err
+}
+
 func (s *ReportService) CreateReport(userID string, req models.CreateReportRequest) (*models.Report, error) {
 	reportID, err := s.generateReportID()
 	if err != nil {

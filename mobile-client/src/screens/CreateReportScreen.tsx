@@ -35,11 +35,8 @@ export function CreateReportScreen() {
       return;
     }
 
-    const mediaTypes =
-      ImagePicker.MediaType?.Images ?? ImagePicker.MediaTypeOptions?.Images;
-
     const result = await ImagePicker.launchImageLibraryAsync({
-      ...(mediaTypes ? { mediaTypes } : {}),
+      mediaTypes: ['images'],
       quality: 0.8,
     });
 

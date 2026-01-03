@@ -13,6 +13,8 @@ import { useRouter } from 'expo-router';
 import { reportsApi } from '../api/reports';
 import { Report } from '../types/report';
 import { ReportCard } from '../components/ReportCard';
+import { AuthenticationError } from '../api/client';
+import { clearStoredTokens } from '../auth/storage';
 
 const tabs = ['All', 'My Reports', 'Open', 'Resolved'] as const;
 type TabKey = (typeof tabs)[number];
@@ -31,12 +33,18 @@ export function HomeScreen() {
       const data = await reportsApi.getAllReports();
       setReports(data);
     } catch (err) {
+      if (err instanceof AuthenticationError) {
+        // Session expired - will be handled by global listener
+        await clearStoredTokens();
+        router.replace('/login');
+        return;
+      }
       setError('Unable to load reports.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     loadReports();
