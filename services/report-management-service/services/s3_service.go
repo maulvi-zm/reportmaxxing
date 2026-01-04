@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"strings"
@@ -77,10 +78,17 @@ func (s *S3Service) GenerateUploadURL(ctx context.Context, userID, fileName, con
 
 	presigned, err := s.presign.PresignPutObject(ctx, input, s3.WithPresignExpires(10*time.Minute))
 	if err != nil {
+		log.Printf("s3-presign: failed bucket=%s object_key=%s content_type=%s err=%v",
+			s.bucket,
+			objectKey,
+			contentType,
+			err,
+		)
 		return "", "", "", err
 	}
 
 	imageURL := fmt.Sprintf("%s/%s/%s", s.publicBaseURL, s.bucket, objectKey)
+	log.Printf("s3-presign: success bucket=%s object_key=%s", s.bucket, objectKey)
 	return presigned.URL, imageURL, objectKey, nil
 }
 

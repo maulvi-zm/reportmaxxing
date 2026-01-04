@@ -81,46 +81,77 @@ export const reportsApi = {
 	},
 
 	async createReport(input: CreateReportInput): Promise<Report> {
-		const response = await apiClient.request<ApiResponse<ApiReport>>('/api/reports', {
-			method: 'POST',
-			body: JSON.stringify({
-				title: input.title,
-				description: input.description,
-				category: input.category,
-				visibility: input.visibility,
-				image_url: input.imageUrl,
-			}),
-		});
-		return transformReport(response.data, true);
+		try {
+			const response = await apiClient.request<ApiResponse<ApiReport>>('/api/reports', {
+				method: 'POST',
+				body: JSON.stringify({
+					title: input.title,
+					description: input.description,
+					category: input.category,
+					visibility: input.visibility,
+					image_url: input.imageUrl,
+				}),
+			});
+			return transformReport(response.data, true);
+		} catch (error) {
+			console.error('createReport failed', error);
+			throw error;
+		}
 	},
 
 	async requestUploadUrl(fileName: string, contentType: string): Promise<UploadUrlResponse> {
-		const response = await apiClient.request<ApiResponse<UploadUrlResponse>>('/api/reports/upload-url', {
-			method: 'POST',
-			body: JSON.stringify({
-				file_name: fileName,
-				content_type: contentType,
-			}),
-		});
-		return response.data;
+		try {
+			const response = await apiClient.request<ApiResponse<UploadUrlResponse>>('/api/reports/upload-url', {
+				method: 'POST',
+				body: JSON.stringify({
+					file_name: fileName,
+					content_type: contentType,
+				}),
+			});
+			try {
+				const parsed = new URL(response.data.upload_url);
+				console.log('upload-url: location', {
+					protocol: parsed.protocol,
+					host: parsed.host,
+					pathname: parsed.pathname,
+				});
+			} catch (error) {
+				console.warn('upload-url: failed to parse URL for logging', error);
+			}
+			return response.data;
+		} catch (error) {
+			console.error('requestUploadUrl failed', { fileName, contentType, error });
+			throw error;
+		}
 	},
 
 	async uploadReportImage(fileUri: string, fileName: string, contentType: string): Promise<string> {
-		const uploadInfo = await this.requestUploadUrl(fileName, contentType);
-		const fileResponse = await fetch(fileUri);
-		const blob = await fileResponse.blob();
-		const uploadResponse = await fetch(uploadInfo.upload_url, {
-			method: 'PUT',
-			headers: {
-				'Content-Type': contentType,
-			},
-			body: blob,
-		});
+		try {
+			const uploadInfo = await this.requestUploadUrl(fileName, contentType);
+			const fileResponse = await fetch(fileUri);
+			const blob = await fileResponse.blob();
+			const uploadResponse = await fetch(uploadInfo.upload_url, {
+				method: 'PUT',
+				headers: {
+					'Content-Type': contentType,
+				},
+				body: blob,
+			});
 
-		if (!uploadResponse.ok) {
-			throw new Error(`Upload failed (${uploadResponse.status})`);
+			if (!uploadResponse.ok) {
+				const responseText = await uploadResponse.text();
+				console.error('uploadReportImage failed', {
+					status: uploadResponse.status,
+					responseText,
+				});
+				throw new Error(`Upload failed (${uploadResponse.status})`);
+			}
+
+			console.log('uploadReportImage success', { imageUrl: uploadInfo.image_url });
+			return uploadInfo.image_url;
+		} catch (error) {
+			console.error('uploadReportImage error', error);
+			throw error;
 		}
-
-		return uploadInfo.image_url;
 	},
 };

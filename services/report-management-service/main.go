@@ -125,16 +125,26 @@ func main() {
 		api.POST("/reports", authMiddleware.RequireRole("CITIZEN"), func(c *gin.Context) {
 			var req models.CreateReportRequest
 			if err := c.ShouldBindJSON(&req); err != nil {
+				log.Printf("create-report: invalid payload: %v", err)
 				response.BadRequest(c, err.Error())
 				return
 			}
 
 			userID := c.GetString("userID")
+			log.Printf("create-report: user_id=%s title=%q category=%s visibility=%s has_image=%t",
+				userID,
+				req.Title,
+				req.Category,
+				req.Visibility,
+				req.ImageURL != "",
+			)
 			report, err := reportService.CreateReport(userID, req)
 			if err != nil {
+				log.Printf("create-report: failed user_id=%s err=%v", userID, err)
 				response.InternalError(c, "Failed to create report")
 				return
 			}
+			log.Printf("create-report: success user_id=%s report_id=%s", userID, report.ID)
 			response.CreatedWithMessage(c, "Report created successfully", report)
 		})
 
@@ -144,11 +154,13 @@ func main() {
 				ContentType string `json:"content_type" binding:"required"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
+				log.Printf("upload-url: invalid payload: %v", err)
 				response.BadRequest(c, err.Error())
 				return
 			}
 
 			userID := c.GetString("userID")
+			log.Printf("upload-url: user_id=%s file_name=%q content_type=%s", userID, req.FileName, req.ContentType)
 			uploadURL, imageURL, objectKey, err := s3Service.GenerateUploadURL(
 				c.Request.Context(),
 				userID,
@@ -156,9 +168,11 @@ func main() {
 				req.ContentType,
 			)
 			if err != nil {
+				log.Printf("upload-url: failed user_id=%s err=%v", userID, err)
 				response.InternalError(c, "Failed to create upload URL")
 				return
 			}
+			log.Printf("upload-url: success user_id=%s object_key=%s", userID, objectKey)
 
 			response.Success(c, gin.H{
 				"upload_url": uploadURL,
